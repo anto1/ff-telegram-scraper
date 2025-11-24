@@ -149,16 +149,23 @@ async def scrape_channel(
         
         # Fetch channel info to get subscriber count
         try:
+            # Get basic channel entity
             channel_entity = await client.get_entity(channel.channel_id)
-            # Get subscriber count (participants_count for channels/megagroups)
-            if hasattr(channel_entity, 'participants_count'):
-                channel.subscriber_count = channel_entity.participants_count
+            
+            # Get FULL channel info to access participants_count
+            # Regular get_entity() doesn't include this information
+            from telethon.tl.functions.channels import GetFullChannelRequest
+            full_channel = await client(GetFullChannelRequest(channel=channel_entity))
+            
+            # Get subscriber count from full channel info
+            subscriber_count = full_channel.full_chat.participants_count
+            if subscriber_count is not None:
+                channel.subscriber_count = subscriber_count
                 print(f"  └─ Subscribers: {channel.subscriber_count:,}")
             else:
-                channel.subscriber_count = None
+                print(f"  └─ Subscriber count not available")
         except Exception as e:
             print(f"  └─ Could not fetch subscriber count: {e}")
-            channel.subscriber_count = None
         
         # Fetch messages from Telegram
         async for message in client.iter_messages(channel.channel_id, limit=limit):
