@@ -366,6 +366,104 @@ async def hard_delete_channel(channel_id: int, db: AsyncSession = Depends(get_db
     return None
 
 
+@app.post("/channels/import-subscriptions", tags=["Channels"])
+async def import_subscriptions(db: AsyncSession = Depends(get_db)):
+    """
+    Import all subscribed Telegram channels into the database.
+    
+    Fetches all channels the authenticated user is subscribed to and adds them to the database.
+    Skips channels that already exist.
+    """
+    try:
+        from scraper import client as telegram_client
+        
+        # Ensure client is connected
+        if not telegram_client.is_connected():
+            await telegram_client.connect()
+        
+        logger.info("📡 Fetching subscribed channels from Telegram...")
+        
+        channels_added = []
+        channels_skipped = []
+        channels_failed = []
+        
+        async for dialog in telegram_client.iter_dialogs():
+            # Only process channels (not groups or users)
+            if dialog.is_channel and not dialog.is_group:
+                channel = dialog.entity
+                channel_id = channel.id
+                
+                # Make it negative if it's a megagroup/channel
+                if not str(channel_id).startswith('-100'):
+                    channel_id = int(f"-100{channel_id}")
+                
+                username = channel.username or "no_username"
+                title = channel.title
+                
+                # Check if channel already exists
+                result = await db.execute(
+                    select(TelegramChannel).where(TelegramChannel.channel_id == channel_id)
+                )
+                existing = result.scalar_one_or_none()
+                
+                if existing:
+                    channels_skipped.append({
+                        "title": title,
+                        "username": username,
+                        "channel_id": channel_id,
+                        "reason": "Already exists"
+                    })
+                    logger.info(f"⏭️  Skipped: {title} (already exists)")
+                    continue
+                
+                # Add new channel
+                try:
+                    new_channel = TelegramChannel(
+                        title=title,
+                        username=username,
+                        channel_id=channel_id,
+                        is_active=True,
+                        notes="Auto-imported from subscriptions"
+                    )
+                    db.add(new_channel)
+                    await db.commit()
+                    await db.refresh(new_channel)
+                    
+                    channels_added.append({
+                        "id": new_channel.id,
+                        "title": title,
+                        "username": username,
+                        "channel_id": channel_id
+                    })
+                    logger.info(f"✅ Added: {title}")
+                    
+                except Exception as e:
+                    await db.rollback()
+                    channels_failed.append({
+                        "title": title,
+                        "username": username,
+                        "channel_id": channel_id,
+                        "error": str(e)
+                    })
+                    logger.error(f"❌ Failed to add {title}: {e}")
+        
+        return {
+            "success": True,
+            "summary": {
+                "added": len(channels_added),
+                "skipped": len(channels_skipped),
+                "failed": len(channels_failed)
+            },
+            "channels_added": channels_added,
+            "channels_skipped": channels_skipped,
+            "channels_failed": channels_failed
+        }
+        
+    except Exception as e:
+        logger.error(f"Error importing subscriptions: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to import subscriptions: {str(e)}")
+
+
 # ============================================================================
 # STATISTICS ENDPOINTS
 # ============================================================================
