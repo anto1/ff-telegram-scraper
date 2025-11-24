@@ -527,10 +527,14 @@ async def import_subscriptions(db: AsyncSession = Depends(get_db)):
                 username = channel.username or "no_username"
                 title = channel.title
                 
+                # Get subscriber count
+                subscriber_count = getattr(channel, 'participants_count', None)
+                
                 telegram_channels.append({
                     "title": title,
                     "username": username,
-                    "channel_id": channel_id
+                    "channel_id": channel_id,
+                    "subscriber_count": subscriber_count
                 })
         
         logger.info(f"Found {len(telegram_channels)} channels on Telegram")
@@ -544,6 +548,7 @@ async def import_subscriptions(db: AsyncSession = Depends(get_db)):
             title = channel_data["title"]
             username = channel_data["username"]
             channel_id = channel_data["channel_id"]
+            subscriber_count = channel_data.get("subscriber_count")
             
             try:
                 # Check if channel already exists
@@ -557,6 +562,7 @@ async def import_subscriptions(db: AsyncSession = Depends(get_db)):
                         "title": title,
                         "username": username,
                         "channel_id": channel_id,
+                        "subscriber_count": subscriber_count,
                         "reason": "Already exists"
                     })
                     logger.info(f"⏭️  Skipped: {title} (already exists)")
@@ -568,6 +574,7 @@ async def import_subscriptions(db: AsyncSession = Depends(get_db)):
                     username=username,
                     channel_id=channel_id,
                     is_active=True,
+                    subscriber_count=subscriber_count,
                     notes="Auto-imported from subscriptions"
                 )
                 db.add(new_channel)
@@ -578,9 +585,10 @@ async def import_subscriptions(db: AsyncSession = Depends(get_db)):
                     "id": new_channel.id,
                     "title": title,
                     "username": username,
-                    "channel_id": channel_id
+                    "channel_id": channel_id,
+                    "subscriber_count": subscriber_count
                 })
-                logger.info(f"✅ Added: {title}")
+                logger.info(f"✅ Added: {title} ({subscriber_count:,} subscribers)" if subscriber_count else f"✅ Added: {title}")
                 
             except Exception as e:
                 await db.rollback()
@@ -588,6 +596,7 @@ async def import_subscriptions(db: AsyncSession = Depends(get_db)):
                     "title": title,
                     "username": username,
                     "channel_id": channel_id,
+                    "subscriber_count": subscriber_count,
                     "error": str(e)
                 })
                 logger.error(f"❌ Failed to add {title}: {e}")
@@ -692,6 +701,7 @@ async def get_channel_stats(
             channel_title=channel.title,
             is_active=channel.is_active,
             last_scraped_at=channel.last_scraped_at,
+            subscriber_count=channel.subscriber_count,
             total_messages=stats_row.total_messages or 0,
             latest_message_date=stats_row.latest_message_date,
             avg_views=round(stats_row.avg_views, 2) if stats_row.avg_views else 0.0,

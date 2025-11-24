@@ -41,6 +41,7 @@ class ChannelResponse(BaseModel):
     created_at: datetime
     updated_at: datetime
     last_scraped_at: Optional[datetime]
+    subscriber_count: Optional[int]
     notes: Optional[str]
     
     model_config = ConfigDict(from_attributes=True)
@@ -56,6 +57,7 @@ class ChannelWithStats(BaseModel):
     created_at: datetime
     updated_at: datetime
     last_scraped_at: Optional[datetime]
+    subscriber_count: Optional[int]
     notes: Optional[str]
     
     # Statistics (added dynamically)
@@ -100,6 +102,7 @@ class ChannelStats(BaseModel):
     channel_title: str
     is_active: bool
     last_scraped_at: Optional[datetime]
+    subscriber_count: Optional[int] = None
     
     # Message counts
     total_messages: int

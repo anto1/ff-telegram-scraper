@@ -43,6 +43,9 @@ class TelegramChannel(Base):
     updated_at = Column(DateTime(timezone=True), default=utcnow, onupdate=utcnow, nullable=False, comment="Last update time")
     last_scraped_at = Column(DateTime(timezone=True), nullable=True, comment="Last successful scrape timestamp")
     
+    # Channel statistics
+    subscriber_count = Column(Integer, nullable=True, comment="Number of channel subscribers/members")
+    
     # Optional metadata
     notes = Column(Text, nullable=True, comment="Optional notes about this channel")
     
