@@ -3,6 +3,8 @@ Database configuration and session management.
 
 Provides async SQLAlchemy engine and session factory for use with FastAPI.
 Uses connection pooling optimized for Railway's Postgres.
+
+Note: Automatically converts postgres:// and postgresql:// URLs to postgresql+asyncpg://
 """
 
 import os
