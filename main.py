@@ -7,7 +7,7 @@ Ready for deployment on Railway with Postgres database.
 
 import os
 import logging
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import List, Optional
 
 from fastapi import FastAPI, Depends, HTTPException, status
@@ -78,7 +78,7 @@ async def root():
         "service": "Telegram Scraper API",
         "status": "running",
         "version": "1.0.0",
-        "timestamp": datetime.utcnow().isoformat()
+        "timestamp": datetime.now(timezone.utc).isoformat()
     }
 
 
@@ -97,7 +97,7 @@ async def health_check(db: AsyncSession = Depends(get_db)):
             "status": "healthy",
             "database": "connected",
             "channels": channel_count,
-            "timestamp": datetime.utcnow().isoformat()
+            "timestamp": datetime.now(timezone.utc).isoformat()
         }
     except Exception as e:
         raise HTTPException(
@@ -305,7 +305,7 @@ async def update_channel(
     for field, value in update_data.items():
         setattr(db_channel, field, value)
     
-    db_channel.updated_at = datetime.utcnow()
+    db_channel.updated_at = datetime.now(timezone.utc)
     
     await db.commit()
     await db.refresh(db_channel)
@@ -333,7 +333,7 @@ async def delete_channel(channel_id: int, db: AsyncSession = Depends(get_db)):
     
     # Soft delete
     db_channel.is_active = False
-    db_channel.updated_at = datetime.utcnow()
+    db_channel.updated_at = datetime.now(timezone.utc)
     
     await db.commit()
     await db.refresh(db_channel)
@@ -534,7 +534,7 @@ async def trigger_scrape(
     For production deployments with many channels, consider implementing this as 
     a background task using Celery or similar to avoid request timeouts.
     """
-    started_at = datetime.utcnow()
+    started_at = datetime.now(timezone.utc)
     
     # Import scraper functions (circular import prevention)
     try:
@@ -554,7 +554,7 @@ async def trigger_scrape(
             # Scrape all active channels
             result = await scrape_all_active_channels(db, limit=200)
         
-        completed_at = datetime.utcnow()
+        completed_at = datetime.now(timezone.utc)
         
         return ScrapeResponse(
             success=result.get("success", True),
@@ -566,7 +566,7 @@ async def trigger_scrape(
         )
     except Exception as e:
         logger.error(f"Scraping failed: {e}", exc_info=True)
-        completed_at = datetime.utcnow()
+        completed_at = datetime.now(timezone.utc)
         return ScrapeResponse(
             success=False,
             channels_processed=0,

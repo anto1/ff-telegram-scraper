@@ -7,7 +7,7 @@ Reads active channels from DB, scrapes messages, and saves results to DB.
 
 import os
 import asyncio
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import List, Optional
 
 from dotenv import load_dotenv
@@ -192,7 +192,7 @@ async def scrape_channel(
                 messages_scraped += 1
         
         # Update last_scraped_at timestamp
-        channel.last_scraped_at = datetime.utcnow()
+        channel.last_scraped_at = datetime.now(timezone.utc)
         
         # Commit all changes
         await db.commit()
@@ -235,7 +235,7 @@ async def scrape_all_active_channels(db: AsyncSession, limit: int = 200) -> dict
     Returns:
         dict: Summary statistics of scraping operation
     """
-    started_at = datetime.utcnow()
+    started_at = datetime.now(timezone.utc)
     
     # Get active channels
     channels = await get_active_channels(db)
@@ -249,7 +249,7 @@ async def scrape_all_active_channels(db: AsyncSession, limit: int = 200) -> dict
             "total_messages_updated": 0,
             "errors": ["No active channels found"],
             "started_at": started_at,
-            "completed_at": datetime.utcnow()
+            "completed_at": datetime.now(timezone.utc)
         }
     
     print(f"\n🚀 Starting scrape of {len(channels)} channels...")
@@ -273,7 +273,7 @@ async def scrape_all_active_channels(db: AsyncSession, limit: int = 200) -> dict
         else:
             errors.append(f"{channel.title}: {result['error']}")
     
-    completed_at = datetime.utcnow()
+    completed_at = datetime.now(timezone.utc)
     duration = (completed_at - started_at).total_seconds()
     
     print("="*80)
@@ -308,7 +308,7 @@ async def scrape_specific_channels(db: AsyncSession, channel_ids: List[int], lim
     Returns:
         dict: Summary statistics of scraping operation
     """
-    started_at = datetime.utcnow()
+    started_at = datetime.now(timezone.utc)
     
     # Get specified channels
     query = select(TelegramChannel).where(
@@ -326,7 +326,7 @@ async def scrape_specific_channels(db: AsyncSession, channel_ids: List[int], lim
             "total_messages_updated": 0,
             "errors": ["No matching active channels found"],
             "started_at": started_at,
-            "completed_at": datetime.utcnow()
+            "completed_at": datetime.now(timezone.utc)
         }
     
     print(f"\n🚀 Starting scrape of {len(channels)} specified channels...")
@@ -348,7 +348,7 @@ async def scrape_specific_channels(db: AsyncSession, channel_ids: List[int], lim
         else:
             errors.append(f"{channel.title}: {result['error']}")
     
-    completed_at = datetime.utcnow()
+    completed_at = datetime.now(timezone.utc)
     
     return {
         "success": len(errors) == 0,
