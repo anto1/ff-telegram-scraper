@@ -6,13 +6,18 @@ Tables:
 - telegram_messages: Scraped messages with engagement metrics
 """
 
-from datetime import datetime
+from datetime import datetime, timezone
 from sqlalchemy import (
     Column, Integer, String, Boolean, DateTime, Text, 
     ForeignKey, BigInteger, Float, Index, JSON
 )
 from sqlalchemy.orm import relationship
 from db import Base
+
+
+# Timezone-aware datetime helper
+def utcnow():
+    return datetime.now(timezone.utc)
 
 
 class TelegramChannel(Base):
@@ -34,9 +39,9 @@ class TelegramChannel(Base):
     
     # Status and timestamps
     is_active = Column(Boolean, default=True, nullable=False, index=True, comment="Whether to scrape this channel")
-    created_at = Column(DateTime, default=datetime.utcnow, nullable=False, comment="When channel was added")
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False, comment="Last update time")
-    last_scraped_at = Column(DateTime, nullable=True, comment="Last successful scrape timestamp")
+    created_at = Column(DateTime(timezone=True), default=utcnow, nullable=False, comment="When channel was added")
+    updated_at = Column(DateTime(timezone=True), default=utcnow, onupdate=utcnow, nullable=False, comment="Last update time")
+    last_scraped_at = Column(DateTime(timezone=True), nullable=True, comment="Last successful scrape timestamp")
     
     # Optional metadata
     notes = Column(Text, nullable=True, comment="Optional notes about this channel")
@@ -67,7 +72,7 @@ class TelegramMessage(Base):
     message_id = Column(BigInteger, nullable=False, comment="Telegram message ID within the channel")
     
     # Message metadata
-    date = Column(DateTime, nullable=True, comment="When message was posted on Telegram")
+    date = Column(DateTime(timezone=True), nullable=True, comment="When message was posted on Telegram")
     text = Column(Text, nullable=True, comment="Full message text")
     
     # Engagement metrics
@@ -85,7 +90,7 @@ class TelegramMessage(Base):
     raw_json = Column(JSON, nullable=True, comment="Full Telegram message object as JSON")
     
     # Timestamp
-    created_at = Column(DateTime, default=datetime.utcnow, nullable=False, comment="When we first saved this message")
+    created_at = Column(DateTime(timezone=True), default=utcnow, nullable=False, comment="When we first saved this message")
     
     # Relationship to channel
     channel = relationship("TelegramChannel", back_populates="messages")
