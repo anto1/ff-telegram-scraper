@@ -24,3 +24,5 @@ FROM information_schema.columns
 WHERE table_name = 'telegram_channels' 
 AND column_name = 'subscriber_count';
 
+
+

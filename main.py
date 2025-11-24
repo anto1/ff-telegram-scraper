@@ -810,6 +810,204 @@ async def get_channel_messages(
 
 
 # ============================================================================
+# ADMIN/DIAGNOSTIC ENDPOINTS
+# ============================================================================
+
+@app.get("/admin/check-null-subscribers", tags=["Admin"])
+async def check_null_subscriber_counts(db: AsyncSession = Depends(get_db)):
+    """
+    Check for channels with null subscriber_count.
+    
+    Returns statistics about how many channels have null subscriber counts
+    and provides a list of affected channels.
+    """
+    try:
+        # Count total channels
+        total_query = select(func.count()).select_from(TelegramChannel)
+        total_result = await db.execute(total_query)
+        total_channels = total_result.scalar() or 0
+        
+        # Count channels with null subscriber_count
+        null_query = select(func.count()).select_from(TelegramChannel).where(
+            TelegramChannel.subscriber_count.is_(None)
+        )
+        null_result = await db.execute(null_query)
+        null_count = null_result.scalar() or 0
+        
+        # Count channels with non-null subscriber_count
+        not_null_count = total_channels - null_count
+        
+        # Get list of channels with null subscriber_count
+        channels_query = select(TelegramChannel).where(
+            TelegramChannel.subscriber_count.is_(None)
+        )
+        channels_result = await db.execute(channels_query)
+        channels_with_null = channels_result.scalars().all()
+        
+        # Build channel list
+        channels_list = [
+            {
+                "id": channel.id,
+                "title": channel.title,
+                "username": channel.username,
+                "channel_id": channel.channel_id,
+                "is_active": channel.is_active
+            }
+            for channel in channels_with_null
+        ]
+        
+        percentage = (null_count / total_channels * 100) if total_channels > 0 else 0
+        
+        return {
+            "success": True,
+            "summary": {
+                "total_channels": total_channels,
+                "channels_with_subscriber_count": not_null_count,
+                "channels_with_null_subscriber_count": null_count,
+                "percentage_null": round(percentage, 2)
+            },
+            "channels_with_null": channels_list
+        }
+        
+    except Exception as e:
+        logger.error(f"Error checking null subscriber counts: {e}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to check null subscriber counts: {str(e)}"
+        )
+
+
+@app.post("/admin/fix-null-subscribers", tags=["Admin"])
+async def fix_null_subscriber_counts(db: AsyncSession = Depends(get_db)):
+    """
+    Fix NULL subscriber_count values by fetching from Telegram.
+    
+    This endpoint:
+    1. Finds all channels with NULL subscriber_count
+    2. Fetches the actual subscriber count from Telegram
+    3. Updates the database with real values
+    
+    Note: This may take a while if there are many channels to update.
+    """
+    try:
+        from scraper import client as telegram_client
+        import asyncio
+        
+        # Connect to Telegram if not already connected
+        if not telegram_client.is_connected():
+            await telegram_client.connect()
+            logger.info("✅ Connected to Telegram")
+        
+        # Find all channels with NULL subscriber_count
+        query = select(TelegramChannel).where(
+            TelegramChannel.subscriber_count.is_(None)
+        )
+        result = await db.execute(query)
+        channels = result.scalars().all()
+        
+        total_channels = len(channels)
+        logger.info(f"📊 Found {total_channels} channels with NULL subscriber_count")
+        
+        if total_channels == 0:
+            return {
+                "success": True,
+                "message": "All channels already have subscriber counts!",
+                "summary": {
+                    "total_processed": 0,
+                    "updated": 0,
+                    "failed": 0
+                }
+            }
+        
+        updated_count = 0
+        failed_count = 0
+        updated_channels = []
+        failed_channels = []
+        
+        for channel in channels:
+            try:
+                # Try to get the channel entity from Telegram
+                try:
+                    # Try by username first if available
+                    if channel.username and channel.username != "no_username":
+                        telegram_entity = await telegram_client.get_entity(channel.username)
+                    else:
+                        # Try by channel_id
+                        telegram_entity = await telegram_client.get_entity(channel.channel_id)
+                    
+                    # Get subscriber count
+                    subscriber_count = getattr(telegram_entity, 'participants_count', None)
+                    
+                    if subscriber_count is not None:
+                        # Update the database
+                        channel.subscriber_count = subscriber_count
+                        await db.commit()
+                        await db.refresh(channel)
+                        
+                        updated_channels.append({
+                            "id": channel.id,
+                            "title": channel.title,
+                            "subscriber_count": subscriber_count
+                        })
+                        updated_count += 1
+                        logger.info(f"✅ Updated {channel.title}: {subscriber_count:,} subscribers")
+                    else:
+                        failed_channels.append({
+                            "id": channel.id,
+                            "title": channel.title,
+                            "reason": "Could not get subscriber count"
+                        })
+                        failed_count += 1
+                
+                except ValueError as e:
+                    failed_channels.append({
+                        "id": channel.id,
+                        "title": channel.title,
+                        "reason": f"Channel not found: {str(e)}"
+                    })
+                    failed_count += 1
+                except Exception as e:
+                    failed_channels.append({
+                        "id": channel.id,
+                        "title": channel.title,
+                        "reason": str(e)
+                    })
+                    failed_count += 1
+                
+                # Small delay to avoid rate limiting
+                await asyncio.sleep(0.5)
+            
+            except Exception as e:
+                logger.error(f"Error processing channel {channel.title}: {e}")
+                failed_channels.append({
+                    "id": channel.id,
+                    "title": channel.title,
+                    "reason": str(e)
+                })
+                failed_count += 1
+                await db.rollback()
+        
+        return {
+            "success": True,
+            "message": f"Processed {total_channels} channels: {updated_count} updated, {failed_count} failed",
+            "summary": {
+                "total_processed": total_channels,
+                "updated": updated_count,
+                "failed": failed_count
+            },
+            "updated_channels": updated_channels,
+            "failed_channels": failed_channels
+        }
+    
+    except Exception as e:
+        logger.error(f"Error fixing null subscriber counts: {e}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to fix null subscriber counts: {str(e)}"
+        )
+
+
+# ============================================================================
 # SCRAPER ENDPOINTS
 # ============================================================================
 
