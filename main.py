@@ -20,7 +20,8 @@ from models import TelegramChannel, TelegramMessage
 from schemas import (
     ChannelCreate, ChannelUpdate, ChannelResponse, ChannelWithStats,
     MessageResponse, ChannelStats, GlobalStats,
-    ScrapeRequest, ScrapeResponse
+    ScrapeRequest, ScrapeResponse,
+    AuthStartRequest, AuthStartResponse, AuthVerifyRequest, AuthVerifyResponse
 )
 
 # Configure logging
@@ -364,6 +365,134 @@ async def hard_delete_channel(channel_id: int, db: AsyncSession = Depends(get_db
     await db.commit()
     
     return None
+
+
+@app.post("/auth/start", response_model=AuthStartResponse, tags=["Authentication"])
+async def auth_start(request: AuthStartRequest):
+    """
+    Step 1: Start Telegram authentication.
+    
+    Sends a verification code to the provided phone number via Telegram.
+    Returns a phone_code_hash that must be used in the verify step.
+    """
+    try:
+        from scraper import client as telegram_client
+        
+        # Ensure client is connected
+        if not telegram_client.is_connected():
+            await telegram_client.connect()
+        
+        logger.info(f"📱 Starting auth for phone: {request.phone_number}")
+        
+        # Send code request
+        sent_code = await telegram_client.send_code_request(request.phone_number)
+        
+        return AuthStartResponse(
+            success=True,
+            message=f"Verification code sent to {request.phone_number}",
+            phone_code_hash=sent_code.phone_code_hash
+        )
+        
+    except Exception as e:
+        logger.error(f"Auth start failed: {e}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to send verification code: {str(e)}"
+        )
+
+
+@app.post("/auth/verify", response_model=AuthVerifyResponse, tags=["Authentication"])
+async def auth_verify(request: AuthVerifyRequest):
+    """
+    Step 2: Complete Telegram authentication.
+    
+    Verifies the code received via Telegram and completes the authentication.
+    This will create/update the telegram_session.session file on the server.
+    """
+    try:
+        from scraper import client as telegram_client
+        
+        # Ensure client is connected
+        if not telegram_client.is_connected():
+            await telegram_client.connect()
+        
+        logger.info(f"🔐 Verifying code for phone: {request.phone_number}")
+        
+        # Sign in with the code
+        me = await telegram_client.sign_in(
+            phone=request.phone_number,
+            code=request.code,
+            phone_code_hash=request.phone_code_hash
+        )
+        
+        user_info = {
+            "id": me.id,
+            "first_name": me.first_name,
+            "last_name": me.last_name,
+            "username": me.username,
+            "phone": me.phone
+        }
+        
+        logger.info(f"✅ Authentication successful for {me.first_name}")
+        
+        return AuthVerifyResponse(
+            success=True,
+            message=f"Successfully authenticated as {me.first_name}",
+            user_info=user_info
+        )
+        
+    except Exception as e:
+        logger.error(f"Auth verification failed: {e}")
+        raise HTTPException(
+            status_code=400,
+            detail=f"Failed to verify code: {str(e)}"
+        )
+
+
+@app.get("/auth/status", tags=["Authentication"])
+async def auth_status():
+    """
+    Check if Telegram client is authenticated.
+    
+    Returns information about the current authentication status.
+    """
+    try:
+        from scraper import client as telegram_client
+        
+        # Ensure client is connected
+        if not telegram_client.is_connected():
+            await telegram_client.connect()
+        
+        try:
+            me = await telegram_client.get_me()
+            if me:
+                return {
+                    "authenticated": True,
+                    "user": {
+                        "id": me.id,
+                        "first_name": me.first_name,
+                        "last_name": me.last_name,
+                        "username": me.username,
+                        "phone": me.phone
+                    }
+                }
+            else:
+                return {
+                    "authenticated": False,
+                    "message": "No active session"
+                }
+        except Exception:
+            return {
+                "authenticated": False,
+                "message": "Session invalid or expired"
+            }
+            
+    except Exception as e:
+        logger.error(f"Auth status check failed: {e}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to check auth status: {str(e)}"
+        )
 
 
 @app.post("/channels/import-subscriptions", tags=["Channels"])

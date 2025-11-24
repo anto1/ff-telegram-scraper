@@ -154,3 +154,34 @@ class ScrapeResponse(BaseModel):
     started_at: datetime
     completed_at: datetime
 
+
+# ============================================================================
+# AUTHENTICATION SCHEMAS
+# ============================================================================
+
+class AuthStartRequest(BaseModel):
+    """Schema for starting Telegram authentication."""
+    phone_number: str = Field(..., description="Phone number with country code (e.g., +1234567890)")
+
+
+class AuthStartResponse(BaseModel):
+    """Schema for authentication start response."""
+    success: bool
+    message: str
+    phone_code_hash: Optional[str] = None
+
+
+class AuthVerifyRequest(BaseModel):
+    """Schema for verifying Telegram authentication code."""
+    phone_number: str = Field(..., description="Phone number used in auth start")
+    code: str = Field(..., description="Verification code received via Telegram")
+    phone_code_hash: str = Field(..., description="Hash received from auth start")
+
+
+class AuthVerifyResponse(BaseModel):
+    """Schema for authentication verification response."""
+    success: bool
+    message: str
+    user_info: Optional[dict] = None
+
+
