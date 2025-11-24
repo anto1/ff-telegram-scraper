@@ -512,10 +512,8 @@ async def import_subscriptions(db: AsyncSession = Depends(get_db)):
         
         logger.info("📡 Fetching subscribed channels from Telegram...")
         
-        channels_added = []
-        channels_skipped = []
-        channels_failed = []
-        
+        # Step 1: Collect all channels from Telegram first
+        telegram_channels = []
         async for dialog in telegram_client.iter_dialogs():
             # Only process channels (not groups or users)
             if dialog.is_channel and not dialog.is_group:
@@ -529,6 +527,25 @@ async def import_subscriptions(db: AsyncSession = Depends(get_db)):
                 username = channel.username or "no_username"
                 title = channel.title
                 
+                telegram_channels.append({
+                    "title": title,
+                    "username": username,
+                    "channel_id": channel_id
+                })
+        
+        logger.info(f"Found {len(telegram_channels)} channels on Telegram")
+        
+        # Step 2: Process channels with database (separate from Telegram iteration)
+        channels_added = []
+        channels_skipped = []
+        channels_failed = []
+        
+        for channel_data in telegram_channels:
+            title = channel_data["title"]
+            username = channel_data["username"]
+            channel_id = channel_data["channel_id"]
+            
+            try:
                 # Check if channel already exists
                 result = await db.execute(
                     select(TelegramChannel).where(TelegramChannel.channel_id == channel_id)
@@ -546,35 +563,34 @@ async def import_subscriptions(db: AsyncSession = Depends(get_db)):
                     continue
                 
                 # Add new channel
-                try:
-                    new_channel = TelegramChannel(
-                        title=title,
-                        username=username,
-                        channel_id=channel_id,
-                        is_active=True,
-                        notes="Auto-imported from subscriptions"
-                    )
-                    db.add(new_channel)
-                    await db.commit()
-                    await db.refresh(new_channel)
-                    
-                    channels_added.append({
-                        "id": new_channel.id,
-                        "title": title,
-                        "username": username,
-                        "channel_id": channel_id
-                    })
-                    logger.info(f"✅ Added: {title}")
-                    
-                except Exception as e:
-                    await db.rollback()
-                    channels_failed.append({
-                        "title": title,
-                        "username": username,
-                        "channel_id": channel_id,
-                        "error": str(e)
-                    })
-                    logger.error(f"❌ Failed to add {title}: {e}")
+                new_channel = TelegramChannel(
+                    title=title,
+                    username=username,
+                    channel_id=channel_id,
+                    is_active=True,
+                    notes="Auto-imported from subscriptions"
+                )
+                db.add(new_channel)
+                await db.commit()
+                await db.refresh(new_channel)
+                
+                channels_added.append({
+                    "id": new_channel.id,
+                    "title": title,
+                    "username": username,
+                    "channel_id": channel_id
+                })
+                logger.info(f"✅ Added: {title}")
+                
+            except Exception as e:
+                await db.rollback()
+                channels_failed.append({
+                    "title": title,
+                    "username": username,
+                    "channel_id": channel_id,
+                    "error": str(e)
+                })
+                logger.error(f"❌ Failed to add {title}: {e}")
         
         return {
             "success": True,
