@@ -7,10 +7,10 @@ Ready for deployment on Railway with Postgres database.
 
 import os
 import logging
-from datetime import datetime, timezone
+from datetime import datetime, timezone, date
 from typing import List, Optional
 
-from fastapi import FastAPI, Depends, HTTPException, status
+from fastapi import FastAPI, Depends, HTTPException, status, Query
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import select, func, desc
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -19,7 +19,7 @@ from db import get_db, init_db
 from models import TelegramChannel, TelegramMessage
 from schemas import (
     ChannelCreate, ChannelUpdate, ChannelResponse, ChannelWithStats,
-    MessageResponse, ChannelStats, GlobalStats,
+    MessageResponse, MessageWithChannelResponse, ChannelStats, GlobalStats,
     ScrapeRequest, ScrapeResponse,
     AuthStartRequest, AuthStartResponse, AuthVerifyRequest, AuthVerifyResponse,
     ColorFlagUpdate
@@ -850,6 +850,125 @@ async def get_channel_messages(
     messages = result.scalars().all()
     
     return messages
+
+
+@app.get("/posts/period", response_model=List[MessageWithChannelResponse], tags=["Messages"])
+async def get_posts_by_period(
+    start_date: Optional[date] = Query(None, description="Start date (inclusive, YYYY-MM-DD)"),
+    end_date: Optional[date] = Query(None, description="End date (inclusive, YYYY-MM-DD)"),
+    channel_ids: Optional[str] = Query(None, description="Comma-separated channel IDs to filter by"),
+    min_views: Optional[int] = Query(None, ge=0, description="Minimum views filter"),
+    order_by: str = Query("engagement_rate", description="Sort by: date, engagement_rate, engagement_count, views"),
+    order: str = Query("desc", description="Sort order: asc or desc"),
+    skip: int = Query(0, ge=0, description="Number of records to skip for pagination"),
+    limit: int = Query(50, ge=1, le=500, description="Maximum number of records to return"),
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    Get posts (messages) with details for any given period.
+    
+    This endpoint allows you to retrieve top posts for specific dates or date ranges.
+    Perfect for creating pages showing top posts for a particular day, week, or month.
+    
+    Query parameters:
+    - start_date: Start date in YYYY-MM-DD format (inclusive). If omitted, no lower bound.
+    - end_date: End date in YYYY-MM-DD format (inclusive). If omitted, no upper bound.
+    - channel_ids: Comma-separated list of channel IDs to filter (e.g., "1,2,3"). If omitted, includes all channels.
+    - min_views: Only return posts with at least this many views
+    - order_by: Sort by date, engagement_rate, engagement_count, or views
+    - order: Sort direction (asc or desc)
+    - skip: Number of records to skip (for pagination)
+    - limit: Maximum number of records to return (max 500)
+    
+    Returns messages with full channel details including channel title, username, and subscriber count.
+    """
+    from datetime import datetime as dt, time
+    
+    # Build base query with JOIN to include channel information
+    query = select(
+        TelegramMessage,
+        TelegramChannel.title.label('channel_title'),
+        TelegramChannel.username.label('channel_username'),
+        TelegramChannel.channel_id.label('channel_telegram_id'),
+        TelegramChannel.subscriber_count.label('channel_subscriber_count'),
+        TelegramChannel.color_flag.label('channel_color_flag')
+    ).join(
+        TelegramChannel, TelegramMessage.channel_id == TelegramChannel.id
+    )
+    
+    # Apply date filters
+    if start_date:
+        # Convert date to datetime at start of day (00:00:00)
+        start_datetime = dt.combine(start_date, time.min).replace(tzinfo=timezone.utc)
+        query = query.where(TelegramMessage.date >= start_datetime)
+    
+    if end_date:
+        # Convert date to datetime at end of day (23:59:59.999999)
+        end_datetime = dt.combine(end_date, time.max).replace(tzinfo=timezone.utc)
+        query = query.where(TelegramMessage.date <= end_datetime)
+    
+    # Apply channel filter
+    if channel_ids:
+        try:
+            channel_id_list = [int(cid.strip()) for cid in channel_ids.split(',')]
+            query = query.where(TelegramMessage.channel_id.in_(channel_id_list))
+        except ValueError:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Invalid channel_ids format. Use comma-separated integers (e.g., '1,2,3')"
+            )
+    
+    # Apply min_views filter
+    if min_views is not None:
+        query = query.where(TelegramMessage.views >= min_views)
+    
+    # Apply ordering
+    order_column = {
+        "date": TelegramMessage.date,
+        "engagement_rate": TelegramMessage.engagement_rate,
+        "engagement_count": TelegramMessage.engagement_count,
+        "views": TelegramMessage.views,
+    }.get(order_by, TelegramMessage.engagement_rate)
+    
+    if order == "desc":
+        query = query.order_by(desc(order_column))
+    else:
+        query = query.order_by(order_column)
+    
+    # Apply pagination
+    query = query.offset(skip).limit(limit)
+    
+    # Execute query
+    result = await db.execute(query)
+    rows = result.all()
+    
+    # Build response with channel details
+    messages_with_channel = []
+    for row in rows:
+        message = row[0]  # TelegramMessage object
+        message_dict = {
+            "id": message.id,
+            "channel_id": message.channel_id,
+            "message_id": message.message_id,
+            "date": message.date,
+            "text": message.text,
+            "views": message.views,
+            "forwards": message.forwards,
+            "replies": message.replies,
+            "total_reactions": message.total_reactions,
+            "engagement_count": message.engagement_count,
+            "engagement_rate": message.engagement_rate,
+            "post_length": message.post_length,
+            "created_at": message.created_at,
+            "channel_title": row.channel_title,
+            "channel_username": row.channel_username,
+            "channel_telegram_id": row.channel_telegram_id,
+            "channel_subscriber_count": row.channel_subscriber_count,
+            "channel_color_flag": row.channel_color_flag,
+        }
+        messages_with_channel.append(MessageWithChannelResponse(**message_dict))
+    
+    return messages_with_channel
 
 
 # ============================================================================

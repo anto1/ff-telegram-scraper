@@ -100,6 +100,32 @@ class MessageResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
 
+class MessageWithChannelResponse(BaseModel):
+    """Schema for message with channel details in API responses."""
+    id: int
+    channel_id: int
+    message_id: int
+    date: Optional[datetime]
+    text: Optional[str]
+    views: Optional[int]
+    forwards: Optional[int]
+    replies: Optional[int]
+    total_reactions: Optional[int]
+    engagement_count: Optional[int]
+    engagement_rate: Optional[float]
+    post_length: Optional[int]
+    created_at: datetime
+    
+    # Channel details
+    channel_title: str
+    channel_username: Optional[str]
+    channel_telegram_id: int
+    channel_subscriber_count: Optional[int]
+    channel_color_flag: Optional[int]
+    
+    model_config = ConfigDict(from_attributes=True)
+
+
 # ============================================================================
 # STATS SCHEMAS
 # ============================================================================
