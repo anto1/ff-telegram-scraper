@@ -218,7 +218,7 @@ async def scrape_channel(
         }
 
 
-async def scrape_all_active_channels(limit: int = 200) -> dict:
+async def scrape_all_active_channels(db: AsyncSession, limit: int = 200) -> dict:
     """
     Scrape all active channels from database.
     
@@ -229,6 +229,7 @@ async def scrape_all_active_channels(limit: int = 200) -> dict:
     4. Saves results to DB
     
     Args:
+        db: Database session
         limit: Maximum messages to fetch per channel
         
     Returns:
@@ -236,67 +237,71 @@ async def scrape_all_active_channels(limit: int = 200) -> dict:
     """
     started_at = datetime.utcnow()
     
-    async with AsyncSessionLocal() as db:
-        # Get active channels
-        channels = await get_active_channels(db)
-        
-        if not channels:
-            print("⚠️  No active channels found in database")
-            return {
-                "success": False,
-                "channels_processed": 0,
-                "total_messages_scraped": 0,
-                "total_messages_updated": 0,
-                "errors": ["No active channels found"],
-                "started_at": started_at,
-                "completed_at": datetime.utcnow()
-            }
-        
-        print(f"\n🚀 Starting scrape of {len(channels)} channels...")
-        print("="*80)
-        
-        total_scraped = 0
-        total_updated = 0
-        errors = []
-        
-        # Scrape each channel
-        for channel in channels:
-            result = await scrape_channel(channel, db, limit=limit)
-            
-            if result["success"]:
-                total_scraped += result["messages_scraped"]
-                total_updated += result["messages_updated"]
-            else:
-                errors.append(f"{channel.title}: {result['error']}")
-        
-        completed_at = datetime.utcnow()
-        duration = (completed_at - started_at).total_seconds()
-        
-        print("="*80)
-        print(f"✓ Scraping completed in {duration:.2f} seconds")
-        print(f"  Channels processed: {len(channels)}")
-        print(f"  New messages: {total_scraped}")
-        print(f"  Updated messages: {total_updated}")
-        if errors:
-            print(f"  Errors: {len(errors)}")
-        print()
-        
+    # Get active channels
+    channels = await get_active_channels(db)
+    
+    if not channels:
+        print("⚠️  No active channels found in database")
         return {
-            "success": len(errors) == 0,
-            "channels_processed": len(channels),
-            "total_messages_scraped": total_scraped,
-            "total_messages_updated": total_updated,
-            "errors": errors,
+            "success": False,
+            "channels_processed": 0,
+            "total_messages_scraped": 0,
+            "total_messages_updated": 0,
+            "errors": ["No active channels found"],
             "started_at": started_at,
-            "completed_at": completed_at
+            "completed_at": datetime.utcnow()
         }
+    
+    print(f"\n🚀 Starting scrape of {len(channels)} channels...")
+    print("="*80)
+    
+    total_scraped = 0
+    total_updated = 0
+    errors = []
+    
+    # Ensure Telegram client is connected
+    if not client.is_connected():
+        await client.connect()
+    
+    # Scrape each channel
+    for channel in channels:
+        result = await scrape_channel(channel, db, limit=limit)
+        
+        if result["success"]:
+            total_scraped += result["messages_scraped"]
+            total_updated += result["messages_updated"]
+        else:
+            errors.append(f"{channel.title}: {result['error']}")
+    
+    completed_at = datetime.utcnow()
+    duration = (completed_at - started_at).total_seconds()
+    
+    print("="*80)
+    print(f"✓ Scraping completed in {duration:.2f} seconds")
+    print(f"  Channels processed: {len(channels)}")
+    print(f"  New messages: {total_scraped}")
+    print(f"  Updated messages: {total_updated}")
+    if errors:
+        print(f"  Errors: {len(errors)}")
+    print()
+    
+    return {
+        "success": len(errors) == 0,
+        "channels_processed": len(channels),
+        "total_messages_scraped": total_scraped,
+        "total_messages_updated": total_updated,
+        "errors": errors,
+        "started_at": started_at,
+        "completed_at": completed_at
+    }
 
 
-async def scrape_specific_channels(channel_ids: List[int], limit: int = 200) -> dict:
+async def scrape_specific_channels(db: AsyncSession, channel_ids: List[int], limit: int = 200) -> dict:
     """
     Scrape specific channels by their database IDs.
     
     Args:
+        db: Database session
         channel_ids: List of channel database IDs to scrape
         limit: Maximum messages to fetch per channel
         
@@ -305,52 +310,55 @@ async def scrape_specific_channels(channel_ids: List[int], limit: int = 200) -> 
     """
     started_at = datetime.utcnow()
     
-    async with AsyncSessionLocal() as db:
-        # Get specified channels
-        query = select(TelegramChannel).where(
-            TelegramChannel.id.in_(channel_ids),
-            TelegramChannel.is_active == True
-        )
-        result = await db.execute(query)
-        channels = result.scalars().all()
-        
-        if not channels:
-            return {
-                "success": False,
-                "channels_processed": 0,
-                "total_messages_scraped": 0,
-                "total_messages_updated": 0,
-                "errors": ["No matching active channels found"],
-                "started_at": started_at,
-                "completed_at": datetime.utcnow()
-            }
-        
-        print(f"\n🚀 Starting scrape of {len(channels)} specified channels...")
-        
-        total_scraped = 0
-        total_updated = 0
-        errors = []
-        
-        for channel in channels:
-            result = await scrape_channel(channel, db, limit=limit)
-            
-            if result["success"]:
-                total_scraped += result["messages_scraped"]
-                total_updated += result["messages_updated"]
-            else:
-                errors.append(f"{channel.title}: {result['error']}")
-        
-        completed_at = datetime.utcnow()
-        
+    # Get specified channels
+    query = select(TelegramChannel).where(
+        TelegramChannel.id.in_(channel_ids),
+        TelegramChannel.is_active == True
+    )
+    result = await db.execute(query)
+    channels = result.scalars().all()
+    
+    if not channels:
         return {
-            "success": len(errors) == 0,
-            "channels_processed": len(channels),
-            "total_messages_scraped": total_scraped,
-            "total_messages_updated": total_updated,
-            "errors": errors,
+            "success": False,
+            "channels_processed": 0,
+            "total_messages_scraped": 0,
+            "total_messages_updated": 0,
+            "errors": ["No matching active channels found"],
             "started_at": started_at,
-            "completed_at": completed_at
+            "completed_at": datetime.utcnow()
         }
+    
+    print(f"\n🚀 Starting scrape of {len(channels)} specified channels...")
+    
+    # Ensure Telegram client is connected
+    if not client.is_connected():
+        await client.connect()
+    
+    total_scraped = 0
+    total_updated = 0
+    errors = []
+    
+    for channel in channels:
+        result = await scrape_channel(channel, db, limit=limit)
+        
+        if result["success"]:
+            total_scraped += result["messages_scraped"]
+            total_updated += result["messages_updated"]
+        else:
+            errors.append(f"{channel.title}: {result['error']}")
+    
+    completed_at = datetime.utcnow()
+    
+    return {
+        "success": len(errors) == 0,
+        "channels_processed": len(channels),
+        "total_messages_scraped": total_scraped,
+        "total_messages_updated": total_updated,
+        "errors": errors,
+        "started_at": started_at,
+        "completed_at": completed_at
+    }
 
 
 # ============================================================================

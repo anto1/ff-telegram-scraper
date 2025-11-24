@@ -6,6 +6,7 @@ Ready for deployment on Railway with Postgres database.
 """
 
 import os
+import logging
 from datetime import datetime
 from typing import List, Optional
 
@@ -21,6 +22,9 @@ from schemas import (
     MessageResponse, ChannelStats, GlobalStats,
     ScrapeRequest, ScrapeResponse
 )
+
+# Configure logging
+logger = logging.getLogger(__name__)
 
 # Initialize FastAPI app
 app = FastAPI(
@@ -47,10 +51,34 @@ app.add_middleware(
 
 @app.on_event("startup")
 async def startup_event():
-    """Initialize database on application startup."""
-    print("🚀 Starting Telegram Scraper API...")
+    """Initialize database and Telegram client on application startup."""
+    logger.info("🚀 Starting Telegram Scraper API...")
     await init_db()
-    print("✓ Application ready!")
+    
+    # Initialize Telegram client
+    try:
+        from scraper import client as telegram_client
+        if not telegram_client.is_connected():
+            await telegram_client.connect()
+            logger.info("✓ Telegram client connected!")
+    except Exception as e:
+        logger.warning(f"⚠️ Could not connect Telegram client: {e}")
+        logger.warning("Scraping functionality will be limited until client is connected.")
+    
+    logger.info("✓ Application ready!")
+
+
+@app.on_event("shutdown")
+async def shutdown_event():
+    """Cleanup on application shutdown."""
+    logger.info("Shutting down Telegram Scraper API...")
+    try:
+        from scraper import client as telegram_client
+        if telegram_client.is_connected():
+            await telegram_client.disconnect()
+            logger.info("✓ Telegram client disconnected.")
+    except Exception as e:
+        logger.error(f"Error disconnecting Telegram client: {e}")
 
 
 @app.get("/", tags=["Health"])
@@ -531,10 +559,10 @@ async def trigger_scrape(
     try:
         if scrape_request.channel_ids:
             # Scrape specific channels by their internal DB IDs
-            result = await scrape_specific_channels(scrape_request.channel_ids, limit=200)
+            result = await scrape_specific_channels(db, scrape_request.channel_ids, limit=200)
         else:
             # Scrape all active channels
-            result = await scrape_all_active_channels(limit=200)
+            result = await scrape_all_active_channels(db, limit=200)
         
         completed_at = datetime.utcnow()
         
