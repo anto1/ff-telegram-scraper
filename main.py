@@ -676,7 +676,7 @@ async def get_channel_stats(
     stats_list = []
     
     for channel in channels:
-        # Get message statistics
+        # Get message statistics (averages)
         stats_query = select(
             func.count(TelegramMessage.id).label('total_messages'),
             func.max(TelegramMessage.date).label('latest_message_date'),
@@ -693,8 +693,34 @@ async def get_channel_stats(
         stats_result = await db.execute(stats_query)
         stats_row = stats_result.one()
         
-        # For median calculation, we'd need to fetch all values and calculate in Python
-        # For now, we'll use averages (median requires more complex SQL or Python processing)
+        # Calculate medians using PostgreSQL's percentile_cont (more efficient than Python)
+        from datetime import timedelta
+        seven_days_ago = datetime.now(timezone.utc) - timedelta(days=7)
+        
+        # Median for all time
+        median_query_all = select(
+            func.percentile_cont(0.5).within_group(TelegramMessage.views).label('median_views_all'),
+            func.percentile_cont(0.5).within_group(TelegramMessage.total_reactions).label('median_reactions'),
+            func.percentile_cont(0.5).within_group(TelegramMessage.replies).label('median_comments'),
+            func.percentile_cont(0.5).within_group(TelegramMessage.engagement_rate).label('median_engagement_rate'),
+        ).where(TelegramMessage.channel_id == channel.id).where(
+            TelegramMessage.views > 0
+        )
+        
+        median_result_all = await db.execute(median_query_all)
+        median_row_all = median_result_all.one()
+        
+        # Median for last 7 days
+        median_query_7d = select(
+            func.percentile_cont(0.5).within_group(TelegramMessage.views).label('median_views_7d'),
+        ).where(TelegramMessage.channel_id == channel.id).where(
+            TelegramMessage.views > 0
+        ).where(
+            TelegramMessage.date >= seven_days_ago
+        )
+        
+        median_result_7d = await db.execute(median_query_7d)
+        median_row_7d = median_result_7d.one_or_none()
         
         channel_stat = ChannelStats(
             channel_id=channel.id,
@@ -710,10 +736,13 @@ async def get_channel_stats(
             avg_replies=round(stats_row.avg_replies, 2) if stats_row.avg_replies else 0.0,
             avg_engagement_count=round(stats_row.avg_engagement_count, 2) if stats_row.avg_engagement_count else 0.0,
             avg_engagement_rate=round(stats_row.avg_engagement_rate, 4) if stats_row.avg_engagement_rate else 0.0,
-            # Note: median calculation would require fetching all values or using percentile_cont in Postgres
-            median_views=round(stats_row.avg_views, 2) if stats_row.avg_views else 0.0,  # Placeholder
-            median_reactions=round(stats_row.avg_reactions, 2) if stats_row.avg_reactions else 0.0,  # Placeholder
-            median_engagement_rate=round(stats_row.avg_engagement_rate, 4) if stats_row.avg_engagement_rate else 0.0,  # Placeholder
+            # Real median calculations
+            median_views=round(median_row_all.median_views_all, 2) if median_row_all.median_views_all else 0.0,
+            median_views_7d=round(median_row_7d.median_views_7d, 2) if median_row_7d and median_row_7d.median_views_7d else 0.0,
+            median_views_all_time=round(median_row_all.median_views_all, 2) if median_row_all.median_views_all else 0.0,
+            median_reactions=round(median_row_all.median_reactions, 2) if median_row_all.median_reactions else 0.0,
+            median_comments=round(median_row_all.median_comments, 2) if median_row_all.median_comments else 0.0,
+            median_engagement_rate=round(median_row_all.median_engagement_rate, 4) if median_row_all.median_engagement_rate else 0.0,
         )
         
         stats_list.append(channel_stat)

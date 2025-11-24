@@ -118,7 +118,10 @@ class ChannelStats(BaseModel):
     
     # Median values (more robust to outliers)
     median_views: Optional[float] = 0.0
+    median_views_7d: Optional[float] = 0.0
+    median_views_all_time: Optional[float] = 0.0
     median_reactions: Optional[float] = 0.0
+    median_comments: Optional[float] = 0.0
     median_engagement_rate: Optional[float] = 0.0
 
 
