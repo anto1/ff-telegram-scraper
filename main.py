@@ -212,6 +212,7 @@ async def list_channels_with_stats(
             "created_at": channel.created_at,
             "updated_at": channel.updated_at,
             "last_scraped_at": channel.last_scraped_at,
+            "subscriber_count": channel.subscriber_count,
             "notes": channel.notes,
             "messages_count": messages_count,
             "latest_message_date": latest_message_date,
