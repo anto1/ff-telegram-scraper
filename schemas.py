@@ -28,7 +28,13 @@ class ChannelUpdate(BaseModel):
     username: Optional[str] = Field(None, max_length=255)
     channel_id: Optional[int] = None
     is_active: Optional[bool] = None
+    color_flag: Optional[int] = None
     notes: Optional[str] = None
+
+
+class ColorFlagUpdate(BaseModel):
+    """Schema for updating channel color flag."""
+    color_flag: int = Field(..., description="Color flag/category number for frontend display")
 
 
 class ChannelResponse(BaseModel):
@@ -42,6 +48,7 @@ class ChannelResponse(BaseModel):
     updated_at: datetime
     last_scraped_at: Optional[datetime]
     subscriber_count: Optional[int]
+    color_flag: Optional[int]
     notes: Optional[str]
     
     model_config = ConfigDict(from_attributes=True)
@@ -58,6 +65,7 @@ class ChannelWithStats(BaseModel):
     updated_at: datetime
     last_scraped_at: Optional[datetime]
     subscriber_count: Optional[int]
+    color_flag: Optional[int]
     notes: Optional[str]
     
     # Statistics (added dynamically)

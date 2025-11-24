@@ -46,6 +46,9 @@ class TelegramChannel(Base):
     # Channel statistics
     subscriber_count = Column(Integer, nullable=True, comment="Number of channel subscribers/members")
     
+    # Color flag for frontend categorization
+    color_flag = Column(Integer, nullable=True, comment="Color flag/category for frontend display (0-N)")
+    
     # Optional metadata
     notes = Column(Text, nullable=True, comment="Optional notes about this channel")
     

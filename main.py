@@ -21,7 +21,8 @@ from schemas import (
     ChannelCreate, ChannelUpdate, ChannelResponse, ChannelWithStats,
     MessageResponse, ChannelStats, GlobalStats,
     ScrapeRequest, ScrapeResponse,
-    AuthStartRequest, AuthStartResponse, AuthVerifyRequest, AuthVerifyResponse
+    AuthStartRequest, AuthStartResponse, AuthVerifyRequest, AuthVerifyResponse,
+    ColorFlagUpdate
 )
 
 # Configure logging
@@ -213,6 +214,7 @@ async def list_channels_with_stats(
             "updated_at": channel.updated_at,
             "last_scraped_at": channel.last_scraped_at,
             "subscriber_count": channel.subscriber_count,
+            "color_flag": channel.color_flag,
             "notes": channel.notes,
             "messages_count": messages_count,
             "latest_message_date": latest_message_date,
@@ -315,6 +317,39 @@ async def update_channel(
     for field, value in update_data.items():
         setattr(db_channel, field, value)
     
+    db_channel.updated_at = datetime.now(timezone.utc)
+    
+    await db.commit()
+    await db.refresh(db_channel)
+    
+    return db_channel
+
+
+@app.patch("/channels/{channel_id}/color-flag", response_model=ChannelResponse, tags=["Channels"])
+async def update_channel_color_flag(
+    channel_id: int,
+    color_flag_update: ColorFlagUpdate,
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    Update the color flag for a specific channel.
+    
+    This is a dedicated endpoint for updating just the color_flag field,
+    which is used by the frontend for channel categorization/visualization.
+    """
+    # Get existing channel
+    query = select(TelegramChannel).where(TelegramChannel.id == channel_id)
+    result = await db.execute(query)
+    db_channel = result.scalar_one_or_none()
+    
+    if not db_channel:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Channel with id {channel_id} not found"
+        )
+    
+    # Update color flag
+    db_channel.color_flag = color_flag_update.color_flag
     db_channel.updated_at = datetime.now(timezone.utc)
     
     await db.commit()
