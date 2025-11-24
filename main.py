@@ -51,21 +51,11 @@ app.add_middleware(
 
 @app.on_event("startup")
 async def startup_event():
-    """Initialize database and Telegram client on application startup."""
+    """Initialize database on application startup."""
     logger.info("🚀 Starting Telegram Scraper API...")
     await init_db()
-    
-    # Initialize Telegram client
-    try:
-        from scraper import client as telegram_client
-        if not telegram_client.is_connected():
-            await telegram_client.connect()
-            logger.info("✓ Telegram client connected!")
-    except Exception as e:
-        logger.warning(f"⚠️ Could not connect Telegram client: {e}")
-        logger.warning("Scraping functionality will be limited until client is connected.")
-    
     logger.info("✓ Application ready!")
+    logger.info("ℹ️  Telegram client will connect when scraping is triggered.")
 
 
 @app.on_event("shutdown")
