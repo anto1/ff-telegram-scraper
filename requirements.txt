@@ -1,0 +1,27 @@
+# FastAPI and web server
+fastapi==0.104.1
+uvicorn[standard]==0.24.0
+python-multipart==0.0.6
+
+# Database (PostgreSQL with async support)
+sqlalchemy[asyncio]==2.0.23
+asyncpg==0.29.0
+psycopg2-binary==2.9.9
+
+# Telegram client
+telethon==1.33.0
+cryptg==0.4.0
+
+# Environment variables
+python-dotenv==1.0.0
+
+# Pydantic for data validation
+pydantic==2.5.0
+pydantic-settings==2.1.0
+
+# CORS support
+aiofiles==23.2.1
+
+# Optional: for production
+gunicorn==21.2.0
+
