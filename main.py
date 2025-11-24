@@ -36,14 +36,22 @@ app = FastAPI(
     redoc_url="/redoc",
 )
 
-# Add CORS middleware (adjust origins for production)
+# Configure CORS origins from environment variable or use defaults
+cors_origins = os.getenv(
+    "CORS_ORIGINS",
+    "https://poker-news.partdirector.ch,http://localhost:3000,http://localhost:5173"
+).split(",")
+
+# Add CORS middleware
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # In production, specify your frontend domain
+    allow_origins=cors_origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+logger.info(f"CORS enabled for origins: {cors_origins}")
 
 
 # ============================================================================
