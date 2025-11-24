@@ -512,56 +512,51 @@ async def trigger_scrape(
     """
     Trigger scraping of Telegram channels.
     
-    This endpoint initiates the scraping process. For production, consider
-    implementing this as a background task using Celery or similar.
-    
-    NOTE: Currently this is a placeholder. The actual scraping logic
-    should be implemented in a background worker to avoid request timeouts.
+    This endpoint initiates the scraping process and returns results immediately.
+    For production deployments with many channels, consider implementing this as 
+    a background task using Celery or similar to avoid request timeouts.
     """
     started_at = datetime.utcnow()
     
     # Import scraper functions (circular import prevention)
     try:
-        from scraper import scrape_channels
-    except ImportError:
+        from scraper import scrape_all_active_channels, scrape_specific_channels
+    except ImportError as e:
         raise HTTPException(
             status_code=status.HTTP_501_NOT_IMPLEMENTED,
-            detail="Scraper module not yet implemented. Use scraper.py directly for now."
+            detail=f"Scraper module import failed: {str(e)}"
         )
     
-    # Get channels to scrape
-    if scrape_request.channel_ids:
-        # Specific channels
-        query = select(TelegramChannel).where(
-            TelegramChannel.id.in_(scrape_request.channel_ids)
-        ).where(TelegramChannel.is_active == True)
-    else:
-        # All active channels
-        query = select(TelegramChannel).where(TelegramChannel.is_active == True)
-    
-    result = await db.execute(query)
-    channels = result.scalars().all()
-    
-    if not channels:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="No active channels found to scrape"
+    # Trigger scraping based on request
+    try:
+        if scrape_request.channel_ids:
+            # Scrape specific channels by their internal DB IDs
+            result = await scrape_specific_channels(scrape_request.channel_ids, limit=200)
+        else:
+            # Scrape all active channels
+            result = await scrape_all_active_channels(limit=200)
+        
+        completed_at = datetime.utcnow()
+        
+        return ScrapeResponse(
+            success=result.get("success", True),
+            channels_processed=result.get("channels_processed", 0),
+            total_messages_scraped=result.get("total_messages_scraped", 0),
+            errors=result.get("errors", []),
+            started_at=started_at,
+            completed_at=completed_at
         )
-    
-    # Trigger scraping (this would ideally be a background job)
-    # For now, return a response indicating scraping would start
-    # In production, use Celery, RQ, or similar background task queue
-    
-    completed_at = datetime.utcnow()
-    
-    return ScrapeResponse(
-        success=True,
-        channels_processed=len(channels),
-        total_messages_scraped=0,  # Would be updated by actual scraper
-        errors=[],
-        started_at=started_at,
-        completed_at=completed_at
-    )
+    except Exception as e:
+        logger.error(f"Scraping failed: {e}", exc_info=True)
+        completed_at = datetime.utcnow()
+        return ScrapeResponse(
+            success=False,
+            channels_processed=0,
+            total_messages_scraped=0,
+            errors=[str(e)],
+            started_at=started_at,
+            completed_at=completed_at
+        )
 
 
 # ============================================================================
