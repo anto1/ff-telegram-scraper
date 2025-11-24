@@ -521,6 +521,9 @@ async def import_subscriptions(db: AsyncSession = Depends(get_db)):
         
         logger.info("📡 Fetching subscribed channels from Telegram...")
         
+        # Import required for full channel info
+        from telethon.tl.functions.channels import GetFullChannelRequest
+        
         # Step 1: Collect all channels from Telegram first
         telegram_channels = []
         async for dialog in telegram_client.iter_dialogs():
@@ -536,8 +539,13 @@ async def import_subscriptions(db: AsyncSession = Depends(get_db)):
                 username = channel.username or "no_username"
                 title = channel.title
                 
-                # Get subscriber count
-                subscriber_count = getattr(channel, 'participants_count', None)
+                # Get subscriber count by fetching full channel info
+                subscriber_count = None
+                try:
+                    full_channel = await telegram_client(GetFullChannelRequest(channel=channel))
+                    subscriber_count = full_channel.full_chat.participants_count
+                except Exception as e:
+                    logger.warning(f"Could not get subscriber count for {title}: {e}")
                 
                 telegram_channels.append({
                     "title": title,
@@ -935,8 +943,13 @@ async def fix_null_subscriber_counts(db: AsyncSession = Depends(get_db)):
                         # Try by channel_id
                         telegram_entity = await telegram_client.get_entity(channel.channel_id)
                     
-                    # Get subscriber count
-                    subscriber_count = getattr(telegram_entity, 'participants_count', None)
+                    # Get FULL channel info to access participants_count
+                    # Regular get_entity() doesn't include this information
+                    from telethon.tl.functions.channels import GetFullChannelRequest
+                    full_channel = await telegram_client(GetFullChannelRequest(channel=telegram_entity))
+                    
+                    # Get subscriber count from full channel info
+                    subscriber_count = full_channel.full_chat.participants_count
                     
                     if subscriber_count is not None:
                         # Update the database

@@ -82,8 +82,13 @@ async def fix_null_subscriber_counts():
                             # Try by channel_id
                             telegram_entity = await telegram_client.get_entity(channel.channel_id)
                         
-                        # Get subscriber count
-                        subscriber_count = getattr(telegram_entity, 'participants_count', None)
+                        # Get FULL channel info to access participants_count
+                        # Regular get_entity() doesn't include this information
+                        from telethon.tl.functions.channels import GetFullChannelRequest
+                        full_channel = await telegram_client(GetFullChannelRequest(channel=telegram_entity))
+                        
+                        # Get subscriber count from full channel info
+                        subscriber_count = full_channel.full_chat.participants_count
                         
                         if subscriber_count is not None:
                             # Update the database
