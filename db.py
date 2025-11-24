@@ -6,9 +6,14 @@ Uses connection pooling optimized for Railway's Postgres.
 """
 
 import os
+import logging
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession, async_sessionmaker
 from sqlalchemy.orm import declarative_base
 from dotenv import load_dotenv
+
+# Configure logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 # Load environment variables
 load_dotenv()
@@ -16,14 +21,37 @@ load_dotenv()
 # Get database URL from environment
 # Railway provides DATABASE_URL, but it uses postgres:// scheme
 # asyncpg requires postgresql:// scheme, so we need to replace it
-DATABASE_URL = os.getenv("DATABASE_URL", "postgresql+asyncpg://localhost/telegram_scraper")
+DATABASE_URL = os.getenv("DATABASE_URL")
+
+if not DATABASE_URL:
+    logger.error("❌ DATABASE_URL environment variable is not set!")
+    logger.error("Please set DATABASE_URL in your Railway environment variables.")
+    logger.error("It should look like: postgresql+asyncpg://user:pass@host:port/dbname")
+    raise ValueError("DATABASE_URL environment variable not set")
+
+logger.info(f"📡 DATABASE_URL found: {DATABASE_URL[:30]}...")
 
 # Fix Railway's postgres:// to postgresql://
+original_url = DATABASE_URL
 if DATABASE_URL.startswith("postgres://"):
     DATABASE_URL = DATABASE_URL.replace("postgres://", "postgresql+asyncpg://", 1)
+    logger.info("🔧 Converted postgres:// to postgresql+asyncpg://")
 elif DATABASE_URL.startswith("postgresql://"):
     # Replace with asyncpg driver
     DATABASE_URL = DATABASE_URL.replace("postgresql://", "postgresql+asyncpg://", 1)
+    logger.info("🔧 Converted postgresql:// to postgresql+asyncpg://")
+elif not DATABASE_URL.startswith("postgresql+asyncpg://"):
+    logger.warning(f"⚠️  DATABASE_URL has unexpected scheme: {DATABASE_URL[:30]}...")
+
+# Log connection details (without password)
+try:
+    if "@" in DATABASE_URL:
+        host_part = DATABASE_URL.split("@")[1]
+        logger.info(f"🔌 Attempting to connect to: {host_part}")
+    else:
+        logger.info(f"🔌 Attempting to connect with URL format: {DATABASE_URL[:50]}...")
+except Exception as e:
+    logger.warning(f"⚠️  Could not parse DATABASE_URL for logging: {e}")
 
 # Create async engine
 # echo=True for development (logs all SQL queries)
@@ -78,11 +106,20 @@ async def init_db():
     
     Call this on application startup.
     """
-    async with engine.begin() as conn:
-        # Import models to ensure they're registered
-        from models import TelegramChannel, TelegramMessage
-        
-        # Create all tables
-        await conn.run_sync(Base.metadata.create_all)
-        print("✓ Database tables created/verified")
+    try:
+        logger.info("🗄️  Initializing database...")
+        async with engine.begin() as conn:
+            # Import models to ensure they're registered
+            from models import TelegramChannel, TelegramMessage
+            
+            # Create all tables
+            await conn.run_sync(Base.metadata.create_all)
+            logger.info("✅ Database tables created/verified successfully!")
+    except Exception as e:
+        logger.error(f"❌ Failed to initialize database: {e}")
+        logger.error("Please check:")
+        logger.error("  1. DATABASE_URL is set correctly in Railway")
+        logger.error("  2. PostgreSQL service is running")
+        logger.error("  3. Network access between services is allowed")
+        raise
 
