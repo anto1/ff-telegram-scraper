@@ -1,0 +1,35 @@
+# Export and statistics files
+export_*.json
+channel_statistics_*.json
+channel_statistics_*.txt
+channel_statistics_*.csv
+
+# Python cache
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+
+# Virtual environment
+venv/
+env/
+ENV/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Credentials
+*.env
+.env
+credentials.json
+session.session
+
