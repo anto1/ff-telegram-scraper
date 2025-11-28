@@ -7,6 +7,7 @@ Ready for deployment on Railway with Postgres database.
 
 import os
 import logging
+import pathlib
 from datetime import datetime, timezone, date
 from typing import List, Optional
 
@@ -411,6 +412,64 @@ async def hard_delete_channel(channel_id: int, db: AsyncSession = Depends(get_db
     return None
 
 
+async def reset_telegram_session():
+    """
+    Delete the Telegram session file to allow fresh authentication.
+    Also disconnects the client if connected.
+    """
+    try:
+        from scraper import client as telegram_client
+        
+        # Disconnect client if connected
+        if telegram_client.is_connected():
+            try:
+                await telegram_client.disconnect()
+            except Exception:
+                pass
+        
+        # Delete session files
+        session_files = [
+            "telegram_session.session",
+            "telegram_session.session-journal"
+        ]
+        
+        deleted_files = []
+        for session_file in session_files:
+            session_path = pathlib.Path(session_file)
+            if session_path.exists():
+                session_path.unlink()
+                deleted_files.append(session_file)
+                logger.info(f"Deleted session file: {session_file}")
+        
+        return deleted_files
+    except Exception as e:
+        logger.error(f"Error resetting session: {e}")
+        raise
+
+
+@app.post("/auth/reset", tags=["Authentication"])
+async def auth_reset():
+    """
+    Reset Telegram session by deleting the session file.
+    
+    Use this when you get SESSION_REVOKED errors or need to re-authenticate.
+    This will delete the current session file and allow you to start fresh.
+    """
+    try:
+        deleted_files = await reset_telegram_session()
+        return {
+            "success": True,
+            "message": "Session reset successfully. You can now call /auth/start to authenticate.",
+            "deleted_files": deleted_files
+        }
+    except Exception as e:
+        logger.error(f"Session reset failed: {e}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to reset session: {str(e)}"
+        )
+
+
 @app.post("/auth/start", response_model=AuthStartResponse, tags=["Authentication"])
 async def auth_start(request: AuthStartRequest):
     """
@@ -418,13 +477,44 @@ async def auth_start(request: AuthStartRequest):
     
     Sends a verification code to the provided phone number via Telegram.
     Returns a phone_code_hash that must be used in the verify step.
+    
+    If you get SESSION_REVOKED errors, call /auth/reset first.
     """
     try:
         from scraper import client as telegram_client
+        from telethon.errors import SessionRevokedError
         
-        # Ensure client is connected
-        if not telegram_client.is_connected():
-            await telegram_client.connect()
+        # Try to connect and check if session is valid
+        try:
+            if not telegram_client.is_connected():
+                await telegram_client.connect()
+            
+            # Try to get user info to check if session is valid
+            try:
+                await telegram_client.get_me()
+            except (SessionRevokedError, Exception) as e:
+                # Session is revoked or invalid, reset it
+                logger.warning(f"Session invalid, resetting: {e}")
+                await reset_telegram_session()
+                # Disconnect and reconnect with fresh session
+                try:
+                    if telegram_client.is_connected():
+                        await telegram_client.disconnect()
+                except Exception:
+                    pass
+                # The client will create a new session on next connect
+                await telegram_client.connect()
+        except Exception as e:
+            logger.warning(f"Connection check failed: {e}")
+            # If connection fails, try to reset and continue
+            try:
+                await reset_telegram_session()
+                if telegram_client.is_connected():
+                    await telegram_client.disconnect()
+                await telegram_client.connect()
+            except Exception as reset_error:
+                logger.error(f"Reset failed: {reset_error}")
+                # Continue anyway - send_code_request might work without session
         
         logger.info(f"📱 Starting auth for phone: {request.phone_number}")
         
@@ -439,6 +529,12 @@ async def auth_start(request: AuthStartRequest):
         
     except Exception as e:
         logger.error(f"Auth start failed: {e}")
+        error_msg = str(e)
+        if "SESSION_REVOKED" in error_msg or "401" in error_msg:
+            raise HTTPException(
+                status_code=400,
+                detail="Session revoked. Please call /auth/reset first, then try again."
+            )
         raise HTTPException(
             status_code=500,
             detail=f"Failed to send verification code: {str(e)}"
@@ -502,41 +598,70 @@ async def auth_status():
     """
     try:
         from scraper import client as telegram_client
+        from telethon.errors import SessionRevokedError
         
-        # Ensure client is connected
-        if not telegram_client.is_connected():
-            await telegram_client.connect()
+        # Check if session file exists
+        session_path = pathlib.Path("telegram_session.session")
+        session_exists = session_path.exists()
         
-        try:
-            me = await telegram_client.get_me()
-            if me:
-                return {
-                    "authenticated": True,
-                    "user": {
-                        "id": me.id,
-                        "first_name": me.first_name,
-                        "last_name": me.last_name,
-                        "username": me.username,
-                        "phone": me.phone
-                    }
-                }
-            else:
-                return {
-                    "authenticated": False,
-                    "message": "No active session"
-                }
-        except Exception:
+        if not session_exists:
             return {
                 "authenticated": False,
-                "message": "Session invalid or expired"
+                "message": "No session file found",
+                "session_file_exists": False
+            }
+        
+        # Try to connect and check status
+        try:
+            if not telegram_client.is_connected():
+                await telegram_client.connect()
+            
+            try:
+                me = await telegram_client.get_me()
+                if me:
+                    return {
+                        "authenticated": True,
+                        "session_file_exists": True,
+                        "user": {
+                            "id": me.id,
+                            "first_name": me.first_name,
+                            "last_name": me.last_name,
+                            "username": me.username,
+                            "phone": me.phone
+                        }
+                    }
+                else:
+                    return {
+                        "authenticated": False,
+                        "session_file_exists": True,
+                        "message": "No active session"
+                    }
+            except SessionRevokedError:
+                return {
+                    "authenticated": False,
+                    "session_file_exists": True,
+                    "message": "Session revoked - call /auth/reset to start fresh"
+                }
+            except Exception as e:
+                return {
+                    "authenticated": False,
+                    "session_file_exists": True,
+                    "message": f"Session invalid or expired: {str(e)}"
+                }
+        except Exception as e:
+            return {
+                "authenticated": False,
+                "session_file_exists": session_exists,
+                "message": f"Connection failed: {str(e)}"
             }
             
     except Exception as e:
         logger.error(f"Auth status check failed: {e}")
-        raise HTTPException(
-            status_code=500,
-            detail=f"Failed to check auth status: {str(e)}"
-        )
+        return {
+            "authenticated": False,
+            "message": f"Failed to check auth status: {str(e)}",
+            "session_file_exists": pathlib.Path("telegram_session.session").exists()
+        }
 
 
 @app.post("/channels/import-subscriptions", tags=["Channels"])
