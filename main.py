@@ -412,6 +412,13 @@ async def hard_delete_channel(channel_id: int, db: AsyncSession = Depends(get_db
     return None
 
 
+def get_session_path():
+    """Get the session file path based on environment."""
+    if os.getenv("RAILWAY_ENVIRONMENT") or os.getenv("RAILWAY_SERVICE_NAME"):
+        return "/tmp/telegram_session"
+    return "telegram_session"
+
+
 async def reset_telegram_session():
     """
     Delete the Telegram session file to allow fresh authentication.
@@ -427,10 +434,13 @@ async def reset_telegram_session():
             except Exception:
                 pass
         
+        # Get session path
+        base_path = get_session_path()
+        
         # Delete session files
         session_files = [
-            "telegram_session.session",
-            "telegram_session.session-journal"
+            f"{base_path}.session",
+            f"{base_path}.session-journal"
         ]
         
         deleted_files = []
@@ -601,7 +611,8 @@ async def auth_status():
         from telethon.errors import SessionRevokedError
         
         # Check if session file exists
-        session_path = pathlib.Path("telegram_session.session")
+        base_path = get_session_path()
+        session_path = pathlib.Path(f"{base_path}.session")
         session_exists = session_path.exists()
         
         if not session_exists:
@@ -657,10 +668,11 @@ async def auth_status():
             
     except Exception as e:
         logger.error(f"Auth status check failed: {e}")
+        base_path = get_session_path()
         return {
             "authenticated": False,
             "message": f"Failed to check auth status: {str(e)}",
-            "session_file_exists": pathlib.Path("telegram_session.session").exists()
+            "session_file_exists": pathlib.Path(f"{base_path}.session").exists()
         }
 
 

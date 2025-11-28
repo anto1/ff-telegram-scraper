@@ -25,8 +25,15 @@ load_dotenv()
 API_ID = int(os.getenv("API_ID"))
 API_HASH = os.getenv("API_HASH")
 
+# Session file path - use /tmp on Railway (writable), local dir otherwise
+# Railway sets RAILWAY_ENVIRONMENT variable
+if os.getenv("RAILWAY_ENVIRONMENT") or os.getenv("RAILWAY_SERVICE_NAME"):
+    SESSION_PATH = "/tmp/telegram_session"
+else:
+    SESSION_PATH = "telegram_session"
+
 # Initialize Telegram client
-client = TelegramClient("telegram_session", API_ID, API_HASH)
+client = TelegramClient(SESSION_PATH, API_ID, API_HASH)
 
 
 # ============================================================================
